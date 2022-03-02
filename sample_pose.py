@@ -1,0 +1,362 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+import copy
+import argparse
+
+import cv2 as cv
+import numpy as np
+import mediapipe as mp
+
+from utils import CvFpsCalc
+
+
+def get_args():
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--device", type=int, default=0)
+    parser.add_argument("--width", help='cap width', type=int, default=960)
+    parser.add_argument("--height", help='cap height', type=int, default=540)
+
+    parser.add_argument('--upper_body_only', action='store_true')
+    parser.add_argument("--min_detection_confidence",
+                        help='min_detection_confidence',
+                        type=float,
+                        default=0.5)
+    parser.add_argument("--min_tracking_confidence",
+                        help='min_tracking_confidence',
+                        type=int,
+                        default=0.5)
+
+    parser.add_argument('--use_brect', action='store_true')
+
+    args = parser.parse_args()
+
+    return args
+
+
+def main():
+    # Argument parsing #################################################################
+    args = get_args()
+
+    cap_device = args.device
+    cap_width = args.width
+    cap_height = args.height
+
+    upper_body_only = args.upper_body_only
+    min_detection_confidence = args.min_detection_confidence
+    min_tracking_confidence = args.min_tracking_confidence
+
+    use_brect = args.use_brect
+
+    # Camera preparation ###############################################################
+    cap = cv.VideoCapture(cap_device)
+    cap.set(cv.CAP_PROP_FRAME_WIDTH, cap_width)
+    cap.set(cv.CAP_PROP_FRAME_HEIGHT, cap_height)
+
+    # Model load #############################################################
+    mp_pose = mp.solutions.pose
+    pose = mp_pose.Pose(
+        upper_body_only=upper_body_only,
+        min_detection_confidence=min_detection_confidence,
+        min_tracking_confidence=min_tracking_confidence,
+    )
+
+    # FPS measurement module ########################################################
+    cvFpsCalc = CvFpsCalc(buffer_len=10)
+
+    while True:
+        display_fps = cvFpsCalc.get()
+
+        # Camera capture #####################################################
+        ret, image = cap.read()
+        if not ret:
+            break
+        image = cv.flip(image, 1)  # ミラー表示
+        debug_image = copy.deepcopy(image)
+
+        # Detection implementation #############################################################
+        image = cv.cvtColor(image, cv.COLOR_BGR2RGB)
+        results = pose.process(image)
+
+        # drawing ################################################################
+        if results.pose_landmarks is not None:
+            # Calculation of circumscribed rectangle
+            brect = calc_bounding_rect(debug_image, results.pose_landmarks)
+            # drawing
+            debug_image = draw_landmarks(debug_image, results.pose_landmarks,
+                                         upper_body_only)
+            debug_image = draw_bounding_rect(use_brect, debug_image, brect)
+
+        cv.putText(debug_image, "FPS:" + str(display_fps), (10, 30),
+                   cv.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 2, cv.LINE_AA)
+
+        # Key processing (ESC: end) #################################################
+        key = cv.waitKey(1)
+        if key == 27:  # ESC
+            break
+
+        # Screen reflection #############################################################
+        cv.imshow('MediaPipe Pose Demo', debug_image)
+
+    cap.release()
+    cv.destroyAllWindows()
+
+
+def calc_bounding_rect(image, landmarks):
+    image_width, image_height = image.shape[1], image.shape[0]
+
+    landmark_array = np.empty((0, 2), int)
+
+    for _, landmark in enumerate(landmarks.landmark):
+        landmark_x = min(int(landmark.x * image_width), image_width - 1)
+        landmark_y = min(int(landmark.y * image_height), image_height - 1)
+
+        landmark_point = [np.array((landmark_x, landmark_y))]
+
+        landmark_array = np.append(landmark_array, landmark_point, axis=0)
+
+    x, y, w, h = cv.boundingRect(landmark_array)
+
+    return [x, y, x + w, y + h]
+
+
+def draw_landmarks(image, landmarks, upper_body_only, visibility_th=0.5):
+    image_width, image_height = image.shape[1], image.shape[0]
+
+    landmark_point = []
+
+    for index, landmark in enumerate(landmarks.landmark):
+        landmark_x = min(int(landmark.x * image_width), image_width - 1)
+        landmark_y = min(int(landmark.y * image_height), image_height - 1)
+        landmark_z = landmark.z
+        landmark_point.append([landmark.visibility, (landmark_x, landmark_y)])
+
+        if landmark.visibility < visibility_th:
+            continue
+
+        if index == 0:  # nose
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 1:  # Right eye: inner corner of the eye
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 2:  # Right eye: pupil
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 3:  # Right eye: outer corner of the eye
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 4:  # Left eye: inner corner of the eye
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 5:  # Left eye: pupil
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 6:  # Left eye: outer corner of the eye
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 7:  # Right ear
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 8:  # Left ear
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 9:  # Mouth: left end
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 10:  # Mouth: left end
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 11:  # Right shoulder
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 12:  # Left shoulder
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 13:  # Right elbow
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 14:  # Left elbow
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 15:  # Right wrist
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 16:  # Left wrist
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 17:  # Right hand 1 (outer edge)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 18:  # Left hand 1 (outer edge)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 19:  # Right hand 2 (tip)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 20:  # Left hand 2 (tip)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 21:  # Left hand 3 (inner end)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 22:  # Left hand 3 (inner end)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 23:  # Waist (right side)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 24:  # Waist (left side)
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 25:  # Right knee
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 26:  # Left knee
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 27:  # Right ankle
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 28:  # Left ankle
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 29:  # Right heel
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 30:  # Left heel
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 31:  # Right toe
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+        if index == 32:  # Left toe
+            cv.circle(image, (landmark_x, landmark_y), 5, (0, 255, 0), 2)
+
+        if not upper_body_only:
+            cv.putText(image, "z:" + str(round(landmark_z, 3)),
+                       (landmark_x - 10, landmark_y - 10),
+                       cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1,
+                       cv.LINE_AA)
+
+    if len(landmark_point) > 0:
+        # right eye
+        if landmark_point[1][0] > visibility_th and landmark_point[2][
+                0] > visibility_th:
+            cv.line(image, landmark_point[1][1], landmark_point[2][1],
+                    (0, 255, 0), 2)
+        if landmark_point[2][0] > visibility_th and landmark_point[3][
+                0] > visibility_th:
+            cv.line(image, landmark_point[2][1], landmark_point[3][1],
+                    (0, 255, 0), 2)
+
+        # left eye
+        if landmark_point[4][0] > visibility_th and landmark_point[5][
+                0] > visibility_th:
+            cv.line(image, landmark_point[4][1], landmark_point[5][1],
+                    (0, 255, 0), 2)
+        if landmark_point[5][0] > visibility_th and landmark_point[6][
+                0] > visibility_th:
+            cv.line(image, landmark_point[5][1], landmark_point[6][1],
+                    (0, 255, 0), 2)
+
+        # mouth
+        if landmark_point[9][0] > visibility_th and landmark_point[10][
+                0] > visibility_th:
+            cv.line(image, landmark_point[9][1], landmark_point[10][1],
+                    (0, 255, 0), 2)
+
+        # shoulder
+        if landmark_point[11][0] > visibility_th and landmark_point[12][
+                0] > visibility_th:
+            cv.line(image, landmark_point[11][1], landmark_point[12][1],
+                    (0, 255, 0), 2)
+
+        # Right arm
+        if landmark_point[11][0] > visibility_th and landmark_point[13][
+                0] > visibility_th:
+            cv.line(image, landmark_point[11][1], landmark_point[13][1],
+                    (0, 255, 0), 2)
+        if landmark_point[13][0] > visibility_th and landmark_point[15][
+                0] > visibility_th:
+            cv.line(image, landmark_point[13][1], landmark_point[15][1],
+                    (0, 255, 0), 2)
+
+        # Left arm
+        if landmark_point[12][0] > visibility_th and landmark_point[14][
+                0] > visibility_th:
+            cv.line(image, landmark_point[12][1], landmark_point[14][1],
+                    (0, 255, 0), 2)
+        if landmark_point[14][0] > visibility_th and landmark_point[16][
+                0] > visibility_th:
+            cv.line(image, landmark_point[14][1], landmark_point[16][1],
+                    (0, 255, 0), 2)
+
+        # right hand
+        if landmark_point[15][0] > visibility_th and landmark_point[17][
+                0] > visibility_th:
+            cv.line(image, landmark_point[15][1], landmark_point[17][1],
+                    (0, 255, 0), 2)
+        if landmark_point[17][0] > visibility_th and landmark_point[19][
+                0] > visibility_th:
+            cv.line(image, landmark_point[17][1], landmark_point[19][1],
+                    (0, 255, 0), 2)
+        if landmark_point[19][0] > visibility_th and landmark_point[21][
+                0] > visibility_th:
+            cv.line(image, landmark_point[19][1], landmark_point[21][1],
+                    (0, 255, 0), 2)
+        if landmark_point[21][0] > visibility_th and landmark_point[15][
+                0] > visibility_th:
+            cv.line(image, landmark_point[21][1], landmark_point[15][1],
+                    (0, 255, 0), 2)
+
+        # left hand
+        if landmark_point[16][0] > visibility_th and landmark_point[18][
+                0] > visibility_th:
+            cv.line(image, landmark_point[16][1], landmark_point[18][1],
+                    (0, 255, 0), 2)
+        if landmark_point[18][0] > visibility_th and landmark_point[20][
+                0] > visibility_th:
+            cv.line(image, landmark_point[18][1], landmark_point[20][1],
+                    (0, 255, 0), 2)
+        if landmark_point[20][0] > visibility_th and landmark_point[22][
+                0] > visibility_th:
+            cv.line(image, landmark_point[20][1], landmark_point[22][1],
+                    (0, 255, 0), 2)
+        if landmark_point[22][0] > visibility_th and landmark_point[16][
+                0] > visibility_th:
+            cv.line(image, landmark_point[22][1], landmark_point[16][1],
+                    (0, 255, 0), 2)
+
+        # body
+        if landmark_point[11][0] > visibility_th and landmark_point[23][
+                0] > visibility_th:
+            cv.line(image, landmark_point[11][1], landmark_point[23][1],
+                    (0, 255, 0), 2)
+        if landmark_point[12][0] > visibility_th and landmark_point[24][
+                0] > visibility_th:
+            cv.line(image, landmark_point[12][1], landmark_point[24][1],
+                    (0, 255, 0), 2)
+        if landmark_point[23][0] > visibility_th and landmark_point[24][
+                0] > visibility_th:
+            cv.line(image, landmark_point[23][1], landmark_point[24][1],
+                    (0, 255, 0), 2)
+
+        if len(landmark_point) > 25:
+            # Right foot
+            if landmark_point[23][0] > visibility_th and landmark_point[25][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[23][1], landmark_point[25][1],
+                        (0, 255, 0), 2)
+            if landmark_point[25][0] > visibility_th and landmark_point[27][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[25][1], landmark_point[27][1],
+                        (0, 255, 0), 2)
+            if landmark_point[27][0] > visibility_th and landmark_point[29][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[27][1], landmark_point[29][1],
+                        (0, 255, 0), 2)
+            if landmark_point[29][0] > visibility_th and landmark_point[31][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[29][1], landmark_point[31][1],
+                        (0, 255, 0), 2)
+
+            # left foot
+            if landmark_point[24][0] > visibility_th and landmark_point[26][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[24][1], landmark_point[26][1],
+                        (0, 255, 0), 2)
+            if landmark_point[26][0] > visibility_th and landmark_point[28][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[26][1], landmark_point[28][1],
+                        (0, 255, 0), 2)
+            if landmark_point[28][0] > visibility_th and landmark_point[30][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[28][1], landmark_point[30][1],
+                        (0, 255, 0), 2)
+            if landmark_point[30][0] > visibility_th and landmark_point[32][
+                    0] > visibility_th:
+                cv.line(image, landmark_point[30][1], landmark_point[32][1],
+                        (0, 255, 0), 2)
+    return image
+
+
+def draw_bounding_rect(use_brect, image, brect):
+    if use_brect:
+        # External rectangle
+        cv.rectangle(image, (brect[0], brect[1]), (brect[2], brect[3]),
+                     (0, 255, 0), 2)
+
+    return image
+
+
+if __name__ == '__main__':
+    main()
